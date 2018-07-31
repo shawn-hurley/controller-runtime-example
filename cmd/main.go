@@ -76,8 +76,71 @@ func main() {
 		&handler.EnqueueRequestForOwner{OwnerType: &u, IsController: true}); err != nil {
 		log.Fatal(err)
 	}
+	cp, err := controller.New("foo-controller", mrg, controller.Options{
+		Reconciler: &reconcilePod{client: mrg.GetClient()},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	if err := cp.Watch(&source.Kind{Type: &p},
+		&handler.EnqueueRequestForObject{}); err != nil {
+		log.Fatal(err)
+	}
 	log.Fatal(mrg.Start(signals.SetupSignalHandler()))
+}
+
+type reconcilePod struct {
+	client client.Client
+}
+
+func (r *reconcilePod) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	// Fetch the ReplicaSet from the cache
+	rs := &unstructured.Unstructured{}
+
+	rs.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "",
+		Version: "v1",
+		Kind:    "Pod",
+	})
+	err := r.client.Get(context.TODO(), request.NamespacedName, rs)
+	if errors.IsNotFound(err) {
+		log.Printf("Could not find ReplicaSet %v.\n", request)
+		return reconcile.Result{}, nil
+	}
+
+	if err != nil {
+		log.Printf("Could not fetch ReplicaSet %v for %+v\n", err, request)
+		return reconcile.Result{}, err
+	}
+	// Print the ReplicaSet
+	log.Printf("Pod Name %s Namespace %s, Pod Name: %#v\n",
+		rs.GetName(), rs.GetNamespace(), rs.Object["kind"])
+	//log.Printf("ReplicaSet Name %s Namespace %s, Pod Name: %s\n",
+	//	rs.Name, rs.Namespace, rs.Spec.Template.Spec.Containers[0].Name)
+
+	// Set the label if it is missing
+	log.Printf("get labels - %#v", rs.GetLabels())
+	if rs.GetLabels() == nil {
+		rs.SetLabels(map[string]string{})
+	}
+	if rs.GetLabels()["hello"] == "world" {
+		return reconcile.Result{}, nil
+	}
+
+	l := rs.GetLabels()
+
+	// Update the ReplicaSet
+	l["hello"] = "world"
+	rs.SetLabels(l)
+	log.Printf("update labels: %v", rs.GetLabels())
+	err = r.client.Update(context.TODO(), rs)
+	if err != nil {
+		log.Printf("Could not write ReplicaSet %v\n", err)
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{}, nil
 }
 
 // reconcileReplicaSet reconciles ReplicaSets
@@ -107,12 +170,14 @@ func (r *reconcileReplicaSet) Reconcile(request reconcile.Request) (reconcile.Re
 		log.Printf("Could not fetch ReplicaSet %v for %+v\n", err, request)
 		return reconcile.Result{}, err
 	}
-
 	// Print the ReplicaSet
-	log.Printf("ReplicaSet Name %s Namespace %s, Pod Name: %s\n",
-		rs.GetName(), rs.GetNamespace(), rs.Object["spec"])
+	log.Printf("ReplicaSet Name %s Namespace %s, Pod Name: %#v\n",
+		rs.GetName(), rs.GetNamespace(), rs.Object["kind"])
+	//log.Printf("ReplicaSet Name %s Namespace %s, Pod Name: %s\n",
+	//	rs.Name, rs.Namespace, rs.Spec.Template.Spec.Containers[0].Name)
 
 	// Set the label if it is missing
+	log.Printf("get labels - %#v", rs.GetLabels())
 	if rs.GetLabels() == nil {
 		rs.SetLabels(map[string]string{})
 	}
@@ -120,8 +185,12 @@ func (r *reconcileReplicaSet) Reconcile(request reconcile.Request) (reconcile.Re
 		return reconcile.Result{}, nil
 	}
 
+	l := rs.GetLabels()
+
 	// Update the ReplicaSet
-	rs.GetLabels()["hello"] = "world"
+	l["hello"] = "world"
+	rs.SetLabels(l)
+	log.Printf("update labels: %v", rs.GetLabels())
 	err = r.client.Update(context.TODO(), rs)
 	if err != nil {
 		log.Printf("Could not write ReplicaSet %v\n", err)

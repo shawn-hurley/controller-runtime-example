@@ -18,11 +18,13 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -76,6 +78,25 @@ func (c *CacheReader) Get(_ context.Context, key client.ObjectKey, out runtime.O
 	// Copy the value of the item in the cache to the returned value
 	// TODO(directxman12): this is a terrible hack, pls fix (we should have deepcopyinto)
 	outVal := reflect.ValueOf(out)
+
+	if o, ok := out.(*unstructured.Unstructured); ok {
+		//Encode the obj to a map[string]interface and set the out.Object
+
+		b, err := json.Marshal(obj)
+		if err != nil {
+			return err
+		}
+		m := map[string]interface{}{}
+		err = json.Unmarshal(b, &m)
+		if err != nil {
+			return err
+		}
+		o.Object = m
+		o.SetGroupVersionKind(c.groupVersionKind)
+		fmt.Printf("in cache reader %v-%v\n\n", o.Object["kind"], o.Object["apiVersion"])
+		return nil
+	}
+
 	objVal := reflect.ValueOf(obj)
 	if !objVal.Type().AssignableTo(outVal.Type()) {
 		return fmt.Errorf("cache had type %s, but %s was asked for", objVal.Type(), outVal.Type())

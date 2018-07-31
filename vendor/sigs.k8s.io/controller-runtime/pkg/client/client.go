@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -65,6 +66,7 @@ func New(config *rest.Config, options Options) (Client, error) {
 			mapper:         options.Mapper,
 			codecs:         serializer.NewCodecFactory(options.Scheme),
 			resourceByType: make(map[reflect.Type]*resourceMeta),
+			resourceByGVK:  make(map[schema.GroupVersionKind]*resourceMeta),
 		},
 		paramCodec: runtime.NewParameterCodec(options.Scheme),
 	}
@@ -97,6 +99,7 @@ func (c *client) Create(ctx context.Context, obj runtime.Object) error {
 
 // Update implements client.Client
 func (c *client) Update(ctx context.Context, obj runtime.Object) error {
+	fmt.Printf("here - updating: %v\n", obj.GetObjectKind().GroupVersionKind())
 	o, err := c.cache.getObjMeta(obj)
 	if err != nil {
 		return err
