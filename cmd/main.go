@@ -18,9 +18,10 @@ import (
 	"flag"
 	"log"
 
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	sdk "github.com/operator-framework/operator-sdk/pkg/sdk"
+	"github.com/shawn-hurley/controller-runtime-example/pkg/apis/app/v1alpha1"
+	"github.com/shawn-hurley/controller-runtime-example/pkg/stub"
+	"k8s.io/apimachinery/pkg/runtime"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -42,91 +43,41 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	v1alpha1.AddToScheme(mrg.GetScheme())
 
+	app := v1alpha1.App{}
 	// Setup a new controller to Reconciler ReplicaSets
 	c, err := controller.New("foo-controller", mrg, controller.Options{
-		Reconciler: &reconcileReplicaSet{client: mrg.GetClient()},
+		Reconciler: &sdkHandlerReconciler{
+			client:  mrg.GetClient(),
+			handler: &stub.Handler{},
+			Object:  &app,
+		},
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	u := unstructured.Unstructured{}
-
-	u.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "apps",
-		Version: "v1",
-		Kind:    "ReplicaSet",
-	})
-
-	// Watch ReplicaSets and enqueue ReplicaSet object key
-	if err := c.Watch(&source.Kind{Type: &u}, &handler.EnqueueRequestForObject{}); err != nil {
+	// Watch apps and enqueue CRD object key
+	if err := c.Watch(&source.Kind{Type: &app}, &handler.EnqueueRequestForObject{}); err != nil {
 		log.Fatal(err)
 	}
-
-	p := unstructured.Unstructured{}
-	p.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "",
-		Version: "v1",
-		Kind:    "Pod",
-	})
-
-	// Watch Pods and enqueue owning ReplicaSet key
-	if err := c.Watch(&source.Kind{Type: &p},
-		&handler.EnqueueRequestForOwner{OwnerType: &u, IsController: true}); err != nil {
-		log.Fatal(err)
-	}
-
 	log.Fatal(mrg.Start(signals.SetupSignalHandler()))
 }
 
-// reconcileReplicaSet reconciles ReplicaSets
-type reconcileReplicaSet struct {
-	client client.Client
+type sdkHandlerReconciler struct {
+	handler sdk.Handler
+	client  client.Client
+	Object  runtime.Object
 }
 
-// Implement reconcile.Reconciler so the controller can reconcile objects
-var _ reconcile.Reconciler = &reconcileReplicaSet{}
-
-func (r *reconcileReplicaSet) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	// Fetch the ReplicaSet from the cache
-	rs := &unstructured.Unstructured{}
-
-	rs.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "apps",
-		Version: "v1",
-		Kind:    "ReplicaSet",
-	})
-	err := r.client.Get(context.TODO(), request.NamespacedName, rs)
-	if errors.IsNotFound(err) {
-		log.Printf("Could not find ReplicaSet %v.\n", request)
-		return reconcile.Result{}, nil
-	}
-
+func (s *sdkHandlerReconciler) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	o := s.Object.DeepCopyObject()
+	s.client.Get(context.TODO(), request.NamespacedName, o)
+	e := sdk.Event{Object: o}
+	err := s.handler.Handle(context.TODO(), e)
 	if err != nil {
-		log.Printf("Could not fetch ReplicaSet %v for %+v\n", err, request)
 		return reconcile.Result{}, err
 	}
-
-	// Print the ReplicaSet
-	log.Printf("ReplicaSet Name %s Namespace %s, Pod Name: %s\n",
-		rs.GetName(), rs.GetNamespace(), rs.Object["spec"])
-
-	// Set the label if it is missing
-	if rs.GetLabels() == nil {
-		rs.SetLabels(map[string]string{})
-	}
-	if rs.GetLabels()["hello"] == "world" {
-		return reconcile.Result{}, nil
-	}
-
-	// Update the ReplicaSet
-	rs.GetLabels()["hello"] = "world"
-	err = r.client.Update(context.TODO(), rs)
-	if err != nil {
-		log.Printf("Could not write ReplicaSet %v\n", err)
-		return reconcile.Result{}, err
-	}
-
 	return reconcile.Result{}, nil
 }

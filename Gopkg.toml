@@ -41,6 +41,10 @@
   branch = "master"
   name = "sigs.k8s.io/controller-runtime"
 
+[[constraint]]
+  name = "github.com/operator-framework/operator-sdk"
+  branch = "master"
+
 [prune]
   go-tests = true
   unused-packages = true
